@@ -97,6 +97,15 @@ lazy_static! {
     interrupt_at: vec![],
     fuzz_futexes: false,
     control_socket: None,
+    // DST fault injection options (disabled by default)
+    fault_disk_write: 0.0,
+    fault_disk_read: 0.0,
+    fault_disk_fsync: 0.0,
+    fault_network_connect: 0.0,
+    fault_network_bind: 0.0,
+    fault_network_accept: 0.0,
+    fault_network_send: 0.0,
+    fault_network_recv: 0.0,
   };
 
   /// Standardized test config: common options on.
@@ -149,6 +158,15 @@ lazy_static! {
     interrupt_at: vec![],
     fuzz_futexes: false,
     control_socket: None,
+    // DST fault injection options (disabled by default)
+    fault_disk_write: 0.0,
+    fault_disk_read: 0.0,
+    fault_disk_fsync: 0.0,
+    fault_network_connect: 0.0,
+    fault_network_bind: 0.0,
+    fault_network_accept: 0.0,
+    fault_network_send: 0.0,
+    fault_network_recv: 0.0,
   };
 
   /// Standardized test config: all options on.
@@ -201,6 +219,15 @@ lazy_static! {
     interrupt_at: vec![],
     fuzz_futexes: false,
     control_socket: None,
+    // DST fault injection options (disabled by default)
+    fault_disk_write: 0.0,
+    fault_disk_read: 0.0,
+    fault_disk_fsync: 0.0,
+    fault_network_connect: 0.0,
+    fault_network_bind: 0.0,
+    fault_network_accept: 0.0,
+    fault_network_send: 0.0,
+    fault_network_recv: 0.0,
   };
 }
 

@@ -30,6 +30,8 @@ use tracing::{debug, error, info, warn};
 use crate::scheduler::Scheduler;
 use crate::types::GlobalTime;
 
+use crate::fault_injection::{FaultType, FaultInjectorStats, ScheduledFault, FaultInjector};
+
 /// Commands that can be sent to the control server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
@@ -60,6 +62,35 @@ pub enum ControlCommand {
 
     /// Ping (for connection testing)
     Ping,
+
+    // ==================== DST Fault Injection Commands ====================
+
+    /// Set fault probability for a specific type
+    SetFaultProbability {
+        /// The fault type (e.g., "disk_write", "network_connect")
+        fault_type: String,
+        /// Probability between 0.0 and 1.0
+        probability: f64,
+    },
+
+    /// Schedule a fault at a specific logical time
+    ScheduleFault {
+        /// Logical time in nanoseconds
+        time_ns: u64,
+        /// The fault type
+        fault_type: String,
+        /// Optional target filter
+        target: Option<String>,
+    },
+
+    /// Get fault injection statistics
+    GetFaultStats,
+
+    /// Enable or disable fault injection
+    SetFaultInjectionEnabled {
+        /// Whether to enable
+        enabled: bool,
+    },
 }
 
 /// Response from control server
@@ -150,6 +181,8 @@ pub struct ControlServer {
     shutdown: Arc<AtomicBool>,
     /// Stats counters
     stats: Arc<Mutex<ControlStats>>,
+    /// Fault injector for DST
+    fault_injector: Option<Arc<Mutex<FaultInjector>>>,
 }
 
 /// Internal stats tracking
@@ -176,6 +209,27 @@ impl ControlServer {
             paused: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(AtomicBool::new(false)),
             stats: Arc::new(Mutex::new(ControlStats::default())),
+            fault_injector: None,
+        }
+    }
+
+    /// Create a new control server with fault injector
+    pub fn new_with_fault_injector(
+        socket_path: impl Into<PathBuf>,
+        scheduler: Arc<Mutex<Scheduler>>,
+        global_time: Arc<Mutex<GlobalTime>>,
+        seed: u64,
+        fault_injector: Arc<Mutex<FaultInjector>>,
+    ) -> Self {
+        Self {
+            socket_path: socket_path.into(),
+            scheduler,
+            global_time,
+            seed,
+            paused: Arc::new(AtomicBool::new(false)),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            stats: Arc::new(Mutex::new(ControlStats::default())),
+            fault_injector: Some(fault_injector),
         }
     }
 
@@ -352,6 +406,107 @@ impl ControlServer {
                 info!("Shutdown requested via control");
                 ControlResponse::ok()
             }
+
+            // ==================== DST Fault Injection Commands ====================
+
+            ControlCommand::SetFaultProbability { fault_type, probability } => {
+                let fi = match &self.fault_injector {
+                    Some(fi) => fi,
+                    None => return ControlResponse::err("Fault injector not available"),
+                };
+
+                let ft = match fault_type.as_str() {
+                    "disk_write" => FaultType::DiskWrite,
+                    "disk_read" => FaultType::DiskRead,
+                    "disk_fsync" => FaultType::DiskFsync,
+                    "network_connect_refused" | "network_connect" => FaultType::NetworkConnectRefused,
+                    "network_connect_timeout" => FaultType::NetworkConnectTimeout,
+                    "network_bind_failed" | "network_bind" => FaultType::NetworkBindFailed,
+                    "network_listen_failed" | "network_listen" => FaultType::NetworkListenFailed,
+                    "network_accept_failed" | "network_accept" => FaultType::NetworkAcceptFailed,
+                    "network_send_failed" | "network_send" => FaultType::NetworkSendFailed,
+                    "network_recv_failed" | "network_recv" => FaultType::NetworkRecvFailed,
+                    "memory_alloc" => FaultType::MemoryAlloc,
+                    "fork_failed" => FaultType::ForkFailed,
+                    _ => return ControlResponse::err(format!("Unknown fault type: {}", fault_type)),
+                };
+
+                if let Ok(mut injector) = fi.lock() {
+                    injector.set_probability(ft, probability);
+                    info!("Set {} probability to {}", fault_type, probability);
+                    ControlResponse::ok()
+                } else {
+                    ControlResponse::err("Failed to lock fault injector")
+                }
+            }
+
+            ControlCommand::ScheduleFault { time_ns, fault_type, target } => {
+                let fi = match &self.fault_injector {
+                    Some(fi) => fi,
+                    None => return ControlResponse::err("Fault injector not available"),
+                };
+
+                let ft = match fault_type.as_str() {
+                    "disk_write" => FaultType::DiskWrite,
+                    "disk_read" => FaultType::DiskRead,
+                    "disk_fsync" => FaultType::DiskFsync,
+                    "network_connect_refused" | "network_connect" => FaultType::NetworkConnectRefused,
+                    "network_connect_timeout" => FaultType::NetworkConnectTimeout,
+                    "network_bind_failed" | "network_bind" => FaultType::NetworkBindFailed,
+                    "network_listen_failed" | "network_listen" => FaultType::NetworkListenFailed,
+                    "network_accept_failed" | "network_accept" => FaultType::NetworkAcceptFailed,
+                    "network_send_failed" | "network_send" => FaultType::NetworkSendFailed,
+                    "network_recv_failed" | "network_recv" => FaultType::NetworkRecvFailed,
+                    "memory_alloc" => FaultType::MemoryAlloc,
+                    "fork_failed" => FaultType::ForkFailed,
+                    _ => return ControlResponse::err(format!("Unknown fault type: {}", fault_type)),
+                };
+
+                if let Ok(mut injector) = fi.lock() {
+                    injector.schedule_fault(ScheduledFault {
+                        time_ns,
+                        fault_type: ft,
+                        target,
+                        consumed: false,
+                    });
+                    info!("Scheduled {} fault at time_ns={}", fault_type, time_ns);
+                    ControlResponse::ok()
+                } else {
+                    ControlResponse::err("Failed to lock fault injector")
+                }
+            }
+
+            ControlCommand::GetFaultStats => {
+                let fi = match &self.fault_injector {
+                    Some(fi) => fi,
+                    None => return ControlResponse::err("Fault injector not available"),
+                };
+
+                if let Ok(injector) = fi.lock() {
+                    let stats = injector.get_stats();
+                    match serde_json::to_value(stats) {
+                        Ok(v) => ControlResponse::ok_with_data(v),
+                        Err(e) => ControlResponse::err(format!("Failed to serialize stats: {}", e)),
+                    }
+                } else {
+                    ControlResponse::err("Failed to lock fault injector")
+                }
+            }
+
+            ControlCommand::SetFaultInjectionEnabled { enabled } => {
+                let fi = match &self.fault_injector {
+                    Some(fi) => fi,
+                    None => return ControlResponse::err("Fault injector not available"),
+                };
+
+                if let Ok(mut injector) = fi.lock() {
+                    injector.set_enabled(enabled);
+                    info!("Fault injection enabled: {}", enabled);
+                    ControlResponse::ok()
+                } else {
+                    ControlResponse::err("Failed to lock fault injector")
+                }
+            }
         }
     }
 
@@ -415,6 +570,27 @@ pub fn spawn_control_server(
     seed: u64,
 ) -> (std::thread::JoinHandle<()>, Arc<AtomicBool>, Arc<AtomicBool>) {
     let server = ControlServer::new(socket_path, scheduler, global_time, seed);
+    let paused = server.paused();
+    let shutdown = server.shutdown_flag();
+
+    let handle = std::thread::spawn(move || {
+        if let Err(e) = server.run() {
+            error!("Control server error: {}", e);
+        }
+    });
+
+    (handle, paused, shutdown)
+}
+
+/// Spawn control server with fault injector in a background thread
+pub fn spawn_control_server_with_fault_injector(
+    socket_path: impl Into<PathBuf>,
+    scheduler: Arc<Mutex<Scheduler>>,
+    global_time: Arc<Mutex<GlobalTime>>,
+    seed: u64,
+    fault_injector: Arc<Mutex<FaultInjector>>,
+) -> (std::thread::JoinHandle<()>, Arc<AtomicBool>, Arc<AtomicBool>) {
+    let server = ControlServer::new_with_fault_injector(socket_path, scheduler, global_time, seed, fault_injector);
     let paused = server.paused();
     let shutdown = server.shutdown_flag();
 

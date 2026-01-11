@@ -49,6 +49,8 @@ use tracing::warn;
 
 use crate::config::Config;
 use crate::consts::ROOT_DETPID;
+use crate::control::spawn_control_server;
+use crate::fault_injection::{FaultInjector, FaultInjectionConfig, FaultType, FaultCheckResult};
 use crate::ivar::Ivar;
 use crate::preemptions::PreemptionReader;
 use crate::preemptions::ThreadHistory;
@@ -72,7 +74,6 @@ use crate::scheduler::runqueue::is_ordinary_priority;
 use crate::scheduler::sched_loop;
 use crate::tool_local::Detcore;
 use crate::types::*;
-use crate::control::spawn_control_server;
 
 #[derive(Debug)]
 struct InodePool {
@@ -196,6 +197,9 @@ pub struct GlobalState {
 
     /// Flag to shutdown from the control server.
     control_shutdown_flag: Option<Arc<AtomicBool>>,
+
+    /// Deterministic fault injector for DST.
+    fault_injector: Arc<Mutex<FaultInjector>>,
 }
 
 impl Default for GlobalState {
@@ -374,6 +378,24 @@ impl GlobalTool for GlobalState {
                 (None, None, None)
             };
 
+        // Initialize fault injector with config
+        let mut fault_injector = FaultInjector::new(cfg.seed);
+        let fault_config = FaultInjectionConfig {
+            disk_write_probability: cfg.fault_disk_write,
+            disk_read_probability: cfg.fault_disk_read,
+            disk_fsync_probability: cfg.fault_disk_fsync,
+            network_connect_probability: cfg.fault_network_connect,
+            network_bind_probability: cfg.fault_network_bind,
+            network_listen_probability: 0.0, // No dedicated flag, use bind
+            network_accept_probability: cfg.fault_network_accept,
+            network_send_probability: cfg.fault_network_send,
+            network_recv_probability: cfg.fault_network_recv,
+        };
+        fault_injector.set_probabilities(&fault_config);
+        if cfg.has_fault_injection() {
+            info!("DST fault injection enabled with config: {:?}", fault_config);
+        }
+
         GlobalState {
             sched,
             next_port: AtomicU16::new(range[0]),
@@ -391,6 +413,7 @@ impl GlobalTool for GlobalState {
             control_handle,
             control_pause_flag,
             control_shutdown_flag,
+            fault_injector: Arc::new(Mutex::new(fault_injector)),
         }
     }
 
@@ -1064,6 +1087,48 @@ impl GlobalState {
             .lock()
             .unwrap()
             .register_alarm(detpid, dettid, seconds, sig.0)
+    }
+
+    // ==================== DST Fault Injection Methods ====================
+
+    /// Check if a fault should be injected for the given fault type.
+    ///
+    /// This is called from syscall handlers to determine if a fault should be
+    /// injected. The decision is deterministic based on the seed.
+    pub fn check_fault(&self, fault_type: FaultType, target: &str) -> FaultCheckResult {
+        let current_time_ns = self.global_time.lock()
+            .map(|t| t.as_nanos().as_nanos())
+            .unwrap_or(0);
+
+        if let Ok(mut fi) = self.fault_injector.lock() {
+            fi.should_inject_fault(fault_type, target, current_time_ns)
+        } else {
+            FaultCheckResult::no_fault()
+        }
+    }
+
+    /// Check if a fault should be injected for a file descriptor operation.
+    /// Skips protected FDs (stdin/stdout/stderr).
+    pub fn check_fd_fault(&self, fault_type: FaultType, fd: i32, target: &str) -> FaultCheckResult {
+        let current_time_ns = self.global_time.lock()
+            .map(|t| t.as_nanos().as_nanos())
+            .unwrap_or(0);
+
+        if let Ok(mut fi) = self.fault_injector.lock() {
+            fi.should_inject_fd_fault(fault_type, fd, target, current_time_ns)
+        } else {
+            FaultCheckResult::no_fault()
+        }
+    }
+
+    /// Get a reference to the fault injector.
+    pub fn fault_injector(&self) -> &Arc<Mutex<FaultInjector>> {
+        &self.fault_injector
+    }
+
+    /// Check if fault injection is enabled.
+    pub fn has_fault_injection(&self) -> bool {
+        self.cfg.has_fault_injection()
     }
 }
 
