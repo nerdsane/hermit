@@ -202,6 +202,27 @@ impl BlockedPool {
     fn no_futex_waiters(&self) -> bool {
         self.futex_waiters.iter().all(|(_, v)| v.is_empty())
     }
+
+    /// Get total number of blocked threads (for control protocol)
+    pub fn len(&self) -> usize {
+        let futex_count: usize = self.futex_waiters.values().map(|v| v.len()).sum();
+        let timed_count = self.timed_waiters.len();
+        let external_count = self.external_io_blockers.len();
+        futex_count + timed_count + external_count
+    }
+
+    /// Get list of all blocked thread IDs (for control protocol)
+    pub fn thread_ids(&self) -> Vec<DetTid> {
+        let mut ids = Vec::new();
+        for waiters in self.futex_waiters.values() {
+            for (tid, _) in waiters {
+                ids.push(*tid);
+            }
+        }
+        ids.extend(self.timed_waiters.thread_ids());
+        ids.extend(self.external_io_blockers.iter().copied());
+        ids
+    }
 }
 
 /// Record the expectations about requests to continue after blocking IO.
@@ -2212,6 +2233,33 @@ impl Scheduler {
             // Return 0 if no previous alarm, as per https://man7.org/linux/man-pages/man2/alarm.2.html
             0
         }
+    }
+
+    // === Control Protocol Support ===
+
+    /// Get the currently running thread (if any)
+    pub fn current_thread(&self) -> Option<DetTid> {
+        self.run_queue.peek()
+    }
+
+    /// Get number of active (runnable) threads
+    pub fn active_thread_count(&self) -> usize {
+        self.run_queue.len()
+    }
+
+    /// Get number of blocked threads
+    pub fn blocked_thread_count(&self) -> usize {
+        self.blocked.len()
+    }
+
+    /// Get snapshot of run queue thread IDs
+    pub fn run_queue_snapshot(&self) -> Vec<DetTid> {
+        self.run_queue.thread_ids()
+    }
+
+    /// Get snapshot of blocked thread IDs
+    pub fn blocked_threads_snapshot(&self) -> Vec<DetTid> {
+        self.blocked.thread_ids()
     }
 }
 

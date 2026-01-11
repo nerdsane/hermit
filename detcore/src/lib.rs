@@ -15,6 +15,8 @@
 
 mod config;
 mod consts;
+/// Control protocol for external coordination (Bloodhound integration)
+pub mod control;
 mod cpuid;
 mod dirents;
 mod fd;
