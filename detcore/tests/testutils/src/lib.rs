@@ -96,6 +96,7 @@ lazy_static! {
     memory: 1024 * 1024 * 1024, //1 GiB
     interrupt_at: vec![],
     fuzz_futexes: false,
+    control_socket: None,
   };
 
   /// Standardized test config: common options on.
@@ -147,6 +148,7 @@ lazy_static! {
     memory: 1024 * 1024 * 1024, //1 GiB
     interrupt_at: vec![],
     fuzz_futexes: false,
+    control_socket: None,
   };
 
   /// Standardized test config: all options on.
@@ -198,6 +200,7 @@ lazy_static! {
     memory: 1024 * 1024 * 1024, //1 GiB
     interrupt_at: vec![],
     fuzz_futexes: false,
+    control_socket: None,
   };
 }
 

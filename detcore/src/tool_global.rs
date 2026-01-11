@@ -72,6 +72,7 @@ use crate::scheduler::runqueue::is_ordinary_priority;
 use crate::scheduler::sched_loop;
 use crate::tool_local::Detcore;
 use crate::types::*;
+use crate::control::spawn_control_server;
 
 #[derive(Debug)]
 struct InodePool {
@@ -186,6 +187,15 @@ pub struct GlobalState {
 
     /// The start is when we construct the global state.  Close enough.
     realtime_start: SystemTime,
+
+    /// Handle for the control server thread (if enabled).
+    control_handle: Option<std::thread::JoinHandle<()>>,
+
+    /// Flag to pause execution from the control server.
+    control_pause_flag: Option<Arc<AtomicBool>>,
+
+    /// Flag to shutdown from the control server.
+    control_shutdown_flag: Option<Arc<AtomicBool>>,
 }
 
 impl Default for GlobalState {
@@ -349,6 +359,21 @@ impl GlobalTool for GlobalState {
 
         let range = GlobalState::read_port_range();
 
+        // Spawn control server if control_socket is specified
+        let (control_handle, control_pause_flag, control_shutdown_flag) =
+            if let Some(ref socket_path) = cfg.control_socket {
+                info!("Spawning control server at {:?}", socket_path);
+                let (handle, pause_flag, shutdown_flag) = spawn_control_server(
+                    socket_path.clone(),
+                    sched.clone(),
+                    global_time.clone(),
+                    cfg.seed,
+                );
+                (Some(handle), Some(pause_flag), Some(shutdown_flag))
+            } else {
+                (None, None, None)
+            };
+
         GlobalState {
             sched,
             next_port: AtomicU16::new(range[0]),
@@ -363,6 +388,9 @@ impl GlobalTool for GlobalState {
             realtime_start: SystemTime::now(),
             global_time,
             preemptions_to_replay,
+            control_handle,
+            control_pause_flag,
+            control_shutdown_flag,
         }
     }
 
