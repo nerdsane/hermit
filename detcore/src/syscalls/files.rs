@@ -46,6 +46,8 @@ use crate::resources::ResourceID;
 use crate::scheduler::runqueue::LAST_PRIORITY;
 use crate::stat::*;
 use crate::tool_global::*;
+use crate::tool_global::check_disk_read_fault;
+use crate::tool_global::check_disk_write_fault;
 use crate::tool_local::Detcore;
 use crate::types::*;
 
@@ -176,6 +178,13 @@ impl<T: RecordOrReplay> Detcore<T> {
             return Ok(res);
         }
 
+        // DST: Check for disk read fault injection (only for regular files)
+        let fd = call.fd();
+        if let Some(errno) = check_disk_read_fault(guest, fd, "read").await {
+            trace!("DST: Injecting read fault on fd={} errno={}", fd, errno);
+            return Err(reverie::Error::from(nix::errno::Errno::from_raw(errno)));
+        }
+
         let (fd_type, resource) = guest
             .thread_state_mut()
             .with_detfd(call.fd(), |detfd| (detfd.ty, detfd.resource.clone()))?;
@@ -287,6 +296,13 @@ impl<T: RecordOrReplay> Detcore<T> {
         guest: &mut G,
         mut call: syscalls::Write,
     ) -> Result<i64, Error> {
+        // DST: Check for disk write fault injection
+        let fd = call.fd();
+        if let Some(errno) = check_disk_write_fault(guest, fd, "write").await {
+            trace!("DST: Injecting write fault on fd={} errno={}", fd, errno);
+            return Err(reverie::Error::from(nix::errno::Errno::from_raw(errno)));
+        }
+
         let (resource, raw_ino) = guest.thread_state().with_detfd(call.fd(), |detfd| {
             (detfd.resource.clone(), detfd.stat.map(|x| x.inode))
         })?;
