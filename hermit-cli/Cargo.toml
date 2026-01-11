@@ -27,8 +27,8 @@ pretty_assertions = { version = "1.2", features = ["alloc"], default-features = 
 rand = { version = "0.8", features = ["small_rng"] }
 rand_pcg = { version = "0.3", features = ["serde1"] }
 regex = "1.12.2"
-reverie = { version = "0.1.0", git = "https://github.com/facebookexperimental/reverie.git", branch = "main" }
-reverie-ptrace = { version = "0.1.0", git = "https://github.com/facebookexperimental/reverie.git", branch = "main" }
+reverie = { version = "0.1.0", git = "https://github.com/nerdsane/reverie.git", branch = "main" }
+reverie-ptrace = { version = "0.1.0", git = "https://github.com/nerdsane/reverie.git", branch = "main" }
 serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0.140", features = ["alloc", "float_roundtrip", "raw_value", "unbounded_depth"] }
 shell-words = "1.1.0"
