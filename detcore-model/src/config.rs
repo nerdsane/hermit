@@ -200,6 +200,17 @@ pub struct Config {
     )]
     pub gdbserver_port: u16,
 
+    /// Path to Unix socket for external control interface.
+    ///
+    /// When specified, Hermit spawns a control server that allows external tools
+    /// to inspect and control execution. The protocol is JSON-RPC style with
+    /// newline-delimited messages.
+    ///
+    /// Supported commands: GetTime, GetStats, GetSchedulerState, Pause, Resume,
+    /// IsPaused, GetSeed, Shutdown, Ping.
+    #[clap(long, value_name = "filepath")]
+    pub control_socket: Option<PathBuf>,
+
     /// Configure the longest time slice for which a guest thread should be allowed to run
     /// uninterrupted. This uses the unit of "virtual nanoseconds", and is implemented using
     /// retired conditional branche (RCB) counting.

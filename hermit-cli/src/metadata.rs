@@ -195,6 +195,7 @@ pub fn record_or_replay_config(data: &Path) -> detcore::Config {
         interrupt_at: vec![],
         fuzz_futexes: false,
         fuzz_seed: None,
+        control_socket: None,
     };
     if config.preemption_timeout.is_some() && !reverie_ptrace::is_perf_supported() {
         tracing::warn!(
