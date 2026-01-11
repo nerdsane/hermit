@@ -541,6 +541,36 @@ impl GlobalTool for GlobalState {
                 }
                 R::FreePort
             }
+            GlobalRequest::CheckFault(fault_type_id, fd, target) => {
+                // Convert fault type ID back to FaultType
+                let fault_type = match fault_type_id {
+                    0 => FaultType::DiskWrite,
+                    1 => FaultType::DiskRead,
+                    2 => FaultType::DiskFsync,
+                    3 => FaultType::NetworkConnectRefused,
+                    4 => FaultType::NetworkConnectTimeout,
+                    5 => FaultType::NetworkBindFailed,
+                    6 => FaultType::NetworkListenFailed,
+                    7 => FaultType::NetworkAcceptFailed,
+                    8 => FaultType::NetworkSendFailed,
+                    9 => FaultType::NetworkRecvFailed,
+                    10 => FaultType::MemoryAlloc,
+                    11 => FaultType::ForkFailed,
+                    _ => return (None, R::CheckFault(false, 0)),
+                };
+
+                let result = if fd >= 0 {
+                    self.check_fd_fault(fault_type, fd, &target)
+                } else {
+                    self.check_fault(fault_type, &target)
+                };
+
+                if result.should_fault {
+                    R::CheckFault(true, result.errno.unwrap_or(libc::EIO))
+                } else {
+                    R::CheckFault(false, 0)
+                }
+            }
         };
 
         let time_from_sched = self.global_time.lock().unwrap().threads_time(dtid);
@@ -1197,6 +1227,10 @@ pub enum GlobalRequest {
     FreePort(u16),
 
     FreePortByFd(i32),
+
+    /// DST: Check if a fault should be injected.
+    /// Args: fault_type_id (from FaultType discriminant), fd (-1 if not applicable), target name
+    CheckFault(u8, i32, String),
 }
 
 /// Responses from the global object
@@ -1225,6 +1259,8 @@ pub enum GlobalResponse {
     AddUsedPort,
     FreePort,
     PortFull,
+    /// DST: Result of fault check - (should_fault, errno_if_fault)
+    CheckFault(bool, i32),
 }
 
 pub async fn send_and_update_time<G, T>(
@@ -1300,6 +1336,107 @@ where
             _ => unreachable!(),
         }
     }
+}
+
+// ==================== DST Fault Injection RPC ====================
+
+/// Fault type IDs for RPC (must match order in FaultType enum)
+pub mod fault_type_ids {
+    pub const DISK_WRITE: u8 = 0;
+    pub const DISK_READ: u8 = 1;
+    pub const DISK_FSYNC: u8 = 2;
+    pub const NETWORK_CONNECT_REFUSED: u8 = 3;
+    pub const NETWORK_CONNECT_TIMEOUT: u8 = 4;
+    pub const NETWORK_BIND_FAILED: u8 = 5;
+    pub const NETWORK_LISTEN_FAILED: u8 = 6;
+    pub const NETWORK_ACCEPT_FAILED: u8 = 7;
+    pub const NETWORK_SEND_FAILED: u8 = 8;
+    pub const NETWORK_RECV_FAILED: u8 = 9;
+    pub const MEMORY_ALLOC: u8 = 10;
+    pub const FORK_FAILED: u8 = 11;
+}
+
+/// Check if a fault should be injected for a syscall.
+///
+/// Returns `Some(errno)` if a fault should be injected, `None` otherwise.
+/// This is deterministic based on the global seed.
+///
+/// # Arguments
+/// * `guest` - The guest context
+/// * `fault_type_id` - The type of fault to check (use fault_type_ids constants)
+/// * `fd` - File descriptor (-1 if not applicable, FDs 0-2 are automatically protected)
+/// * `target` - Context string for logging (e.g., syscall name or path)
+pub async fn check_fault<G, T>(guest: &mut G, fault_type_id: u8, fd: i32, target: &str) -> Option<i32>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    // Skip if fault injection is not configured
+    if !guest.config().has_fault_injection() {
+        return None;
+    }
+
+    let resp = send_and_update_time(
+        guest,
+        GlobalRequest::CheckFault(fault_type_id, fd, target.to_string()),
+    )
+    .await;
+
+    match resp.1 {
+        GlobalResponse::CheckFault(should_fault, errno) => {
+            if should_fault {
+                Some(errno)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Convenience function for checking disk write faults.
+pub async fn check_disk_write_fault<G, T>(guest: &mut G, fd: i32, target: &str) -> Option<i32>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    check_fault(guest, fault_type_ids::DISK_WRITE, fd, target).await
+}
+
+/// Convenience function for checking disk read faults.
+pub async fn check_disk_read_fault<G, T>(guest: &mut G, fd: i32, target: &str) -> Option<i32>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    check_fault(guest, fault_type_ids::DISK_READ, fd, target).await
+}
+
+/// Convenience function for checking network connect faults.
+pub async fn check_network_connect_fault<G, T>(guest: &mut G, target: &str) -> Option<i32>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    check_fault(guest, fault_type_ids::NETWORK_CONNECT_REFUSED, -1, target).await
+}
+
+/// Convenience function for checking network send faults.
+pub async fn check_network_send_fault<G, T>(guest: &mut G, fd: i32, target: &str) -> Option<i32>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    check_fault(guest, fault_type_ids::NETWORK_SEND_FAILED, fd, target).await
+}
+
+/// Convenience function for checking network recv faults.
+pub async fn check_network_recv_fault<G, T>(guest: &mut G, fd: i32, target: &str) -> Option<i32>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    check_fault(guest, fault_type_ids::NETWORK_RECV_FAILED, fd, target).await
 }
 
 /// Global method RPC to allow a new thread to begin execution, called from the child thread.

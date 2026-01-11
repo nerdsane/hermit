@@ -15,6 +15,7 @@ use std::time::Duration;
 use reverie::Error;
 use reverie::Guest;
 use reverie::syscalls;
+use reverie::syscalls::Errno;
 use reverie::syscalls::Syscall;
 use reverie::syscalls::SyscallInfo;
 use tracing::debug;
@@ -30,6 +31,9 @@ use crate::syscalls::helpers::NonblockableSyscall;
 use crate::syscalls::helpers::millis_duration_to_absolute_timeout;
 use crate::syscalls::helpers::retry_nonblocking_syscall_with_timeout;
 use crate::tool_global::*;
+use crate::tool_global::check_network_connect_fault;
+use crate::tool_global::check_network_send_fault;
+use crate::tool_global::check_network_recv_fault;
 use crate::tool_local::Detcore;
 
 // Printing helper
@@ -182,6 +186,12 @@ impl<T: RecordOrReplay> Detcore<T> {
         guest: &mut G,
         call: syscalls::Connect,
     ) -> Result<i64, Error> {
+        // DST: Check for network connect fault injection
+        if let Some(errno) = check_network_connect_fault(guest, "connect").await {
+            debug!("DST: Injecting connect fault errno={}", errno);
+            return Err(reverie::Error::from(nix::errno::Errno::from_raw(errno)));
+        }
+
         if guest.config().sched_heuristic == SchedHeuristic::ConnectBind {
             trace!("Scheduling heuristic: reprioritizing connect");
             let resource = ResourceID::PriorityChangePoint(
