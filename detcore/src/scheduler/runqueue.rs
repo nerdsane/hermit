@@ -506,6 +506,16 @@ impl RunQueue {
             assert!(old.is_none()); // round robin turns should ensure uniqueness
         }
     }
+
+    /// Peek at the next thread to run without modifying the queue (for control protocol)
+    pub fn peek(&self) -> Option<DetTid> {
+        self.queue.first_key_value().map(|(_k, v)| v.tid)
+    }
+
+    /// Get list of all thread IDs in the run queue (for control protocol)
+    pub fn thread_ids(&self) -> Vec<DetTid> {
+        self.tids().copied().collect()
+    }
 }
 
 impl Default for RunQueue {

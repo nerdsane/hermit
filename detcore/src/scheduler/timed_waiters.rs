@@ -181,4 +181,18 @@ impl TimedEvents {
             .iter()
             .flat_map(|(key, set)| set.iter().map(|dtid| (*key, *dtid)))
     }
+
+    /// Get list of thread IDs waiting on timed events (for control protocol)
+    pub fn thread_ids(&self) -> Vec<DetTid> {
+        let mut ids = Vec::new();
+        for set in self.map.values() {
+            for evt in set {
+                match evt {
+                    TimedEvent::ThreadEvt(tid) => ids.push(*tid),
+                    TimedEvent::AlarmEvt(_, tid, _) => ids.push(*tid),
+                }
+            }
+        }
+        ids
+    }
 }
