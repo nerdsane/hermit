@@ -20,6 +20,8 @@ pub mod control;
 mod cpuid;
 mod dirents;
 mod fd;
+/// Deterministic fault injection for DST (Deterministic Simulation Testing)
+pub mod fault_injection;
 #[allow(unused)]
 mod ivar;
 pub mod logdiff;

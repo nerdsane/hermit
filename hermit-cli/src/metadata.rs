@@ -196,6 +196,15 @@ pub fn record_or_replay_config(data: &Path) -> detcore::Config {
         fuzz_futexes: false,
         fuzz_seed: None,
         control_socket: None,
+        // DST fault injection options (disabled during record/replay)
+        fault_disk_write: 0.0,
+        fault_disk_read: 0.0,
+        fault_disk_fsync: 0.0,
+        fault_network_connect: 0.0,
+        fault_network_bind: 0.0,
+        fault_network_accept: 0.0,
+        fault_network_send: 0.0,
+        fault_network_recv: 0.0,
     };
     if config.preemption_timeout.is_some() && !reverie_ptrace::is_perf_supported() {
         tracing::warn!(

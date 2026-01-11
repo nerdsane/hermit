@@ -312,6 +312,48 @@ pub struct Config {
     /// interrupt points specified
     #[clap(long, value_name = "tid:rcbs", parse(try_from_str = try_parse_numbers_with_colon))]
     pub interrupt_at: Vec<(DetTid, u64)>,
+
+    // ==================== DST Fault Injection Options ====================
+
+    /// Probability of injecting disk write failures (0.0 to 1.0).
+    /// When enabled, write/pwrite syscalls may return EIO.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_disk_write: f64,
+
+    /// Probability of injecting disk read failures (0.0 to 1.0).
+    /// When enabled, read/pread syscalls may return EIO.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_disk_read: f64,
+
+    /// Probability of injecting disk fsync failures (0.0 to 1.0).
+    /// When enabled, fsync/fdatasync syscalls may return EIO.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_disk_fsync: f64,
+
+    /// Probability of injecting network connect failures (0.0 to 1.0).
+    /// When enabled, connect syscalls may return ECONNREFUSED.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_network_connect: f64,
+
+    /// Probability of injecting network bind failures (0.0 to 1.0).
+    /// When enabled, bind syscalls may return EADDRINUSE.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_network_bind: f64,
+
+    /// Probability of injecting network accept failures (0.0 to 1.0).
+    /// When enabled, accept syscalls may return ECONNABORTED.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_network_accept: f64,
+
+    /// Probability of injecting network send failures (0.0 to 1.0).
+    /// When enabled, send/sendto syscalls may return EPIPE.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_network_send: f64,
+
+    /// Probability of injecting network recv failures (0.0 to 1.0).
+    /// When enabled, recv/recvfrom syscalls may return ECONNRESET.
+    #[clap(long, value_name = "float", default_value = "0.0")]
+    pub fault_network_recv: f64,
 }
 
 fn try_parse_numbers_with_colon(from_str: &str) -> anyhow::Result<(DetTid, u64)> {
@@ -593,6 +635,31 @@ impl fmt::Display for Config {
         for (tid, rcb) in &self.interrupt_at {
             write!(f, " --interrupt-at={}:{}", tid, rcb)?;
         }
+        // Fault injection options
+        if self.fault_disk_write > 0.0 {
+            write!(f, " --fault-disk-write={}", self.fault_disk_write)?;
+        }
+        if self.fault_disk_read > 0.0 {
+            write!(f, " --fault-disk-read={}", self.fault_disk_read)?;
+        }
+        if self.fault_disk_fsync > 0.0 {
+            write!(f, " --fault-disk-fsync={}", self.fault_disk_fsync)?;
+        }
+        if self.fault_network_connect > 0.0 {
+            write!(f, " --fault-network-connect={}", self.fault_network_connect)?;
+        }
+        if self.fault_network_bind > 0.0 {
+            write!(f, " --fault-network-bind={}", self.fault_network_bind)?;
+        }
+        if self.fault_network_accept > 0.0 {
+            write!(f, " --fault-network-accept={}", self.fault_network_accept)?;
+        }
+        if self.fault_network_send > 0.0 {
+            write!(f, " --fault-network-send={}", self.fault_network_send)?;
+        }
+        if self.fault_network_recv > 0.0 {
+            write!(f, " --fault-network-recv={}", self.fault_network_recv)?;
+        }
         Ok(())
     }
 }
@@ -774,6 +841,18 @@ impl Config {
     /// parameter if former isn't specified
     pub fn sched_seed(&self) -> u64 {
         self.sched_seed.unwrap_or(self.seed)
+    }
+
+    /// Check if any fault injection is configured.
+    pub fn has_fault_injection(&self) -> bool {
+        self.fault_disk_write > 0.0
+            || self.fault_disk_read > 0.0
+            || self.fault_disk_fsync > 0.0
+            || self.fault_network_connect > 0.0
+            || self.fault_network_bind > 0.0
+            || self.fault_network_accept > 0.0
+            || self.fault_network_send > 0.0
+            || self.fault_network_recv > 0.0
     }
 }
 
